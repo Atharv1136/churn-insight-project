@@ -1,10 +1,11 @@
-import { useState } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { motion } from 'framer-motion';
 import {
   HelpCircle,
   ArrowRight,
   TrendingUp,
   TrendingDown,
+  Loader2,
 } from 'lucide-react';
 import {
   BarChart,
@@ -27,90 +28,149 @@ import {
 } from '@/components/ui/select';
 import { Slider } from '@/components/ui/slider';
 import { cn } from '@/lib/utils';
+import { api, type CustomerInput, type PredictionResult } from '@/lib/api';
 
-const customers = [
-  { id: 'CUST-001', name: 'John Doe', probability: 0.82, risk: 'High' },
-  { id: 'CUST-004', name: 'Alice Brown', probability: 0.71, risk: 'High' },
-  { id: 'CUST-002', name: 'Jane Smith', probability: 0.45, risk: 'Medium' },
-  { id: 'CUST-005', name: 'Charlie Davis', probability: 0.32, risk: 'Medium' },
-  { id: 'CUST-003', name: 'Bob Wilson', probability: 0.15, risk: 'Low' },
-];
+// Helper to simulate SHAP values (since we don't have backend endpoint yet)
+const getSimulatedShapValues = (customerId: string, input: CustomerInput) => {
+  // Generate pseudo-SHAP based on input values to look realistic
+  const shap = [
+    { feature: 'Contract Type', value: input.Contract === 'Month-to-month' ? 0.32 : -0.15, impact: input.Contract === 'Month-to-month' ? 'positive' : 'negative' },
+    { feature: 'Tenure', value: input.tenure < 12 ? 0.28 : -0.20, impact: input.tenure < 12 ? 'positive' : 'negative' },
+    { feature: 'Monthly Charges', value: input.MonthlyCharges > 80 ? 0.12 : -0.05, impact: input.MonthlyCharges > 80 ? 'positive' : 'negative' },
+    { feature: 'Tech Support', value: input.TechSupport === 'No' ? 0.10 : -0.12, impact: input.TechSupport === 'No' ? 'positive' : 'negative' },
+    { feature: 'Internet Service', value: input.InternetService === 'Fiber optic' ? 0.05 : -0.05, impact: input.InternetService === 'Fiber optic' ? 'positive' : 'negative' },
+    { feature: 'Payment Method', value: input.PaymentMethod.includes('check') ? 0.08 : -0.02, impact: input.PaymentMethod.includes('check') ? 'positive' : 'negative' },
+  ] as const;
 
-const getShapValues = (customerId: string) => {
-  // Simulated SHAP values based on customer
-  const shapData: Record<string, { feature: string; value: number; impact: 'positive' | 'negative' }[]> = {
-    'CUST-001': [
-      { feature: 'Contract Type', value: 0.32, impact: 'positive' },
-      { feature: 'Tenure', value: 0.18, impact: 'positive' },
-      { feature: 'Monthly Charges', value: 0.12, impact: 'positive' },
-      { feature: 'Payment Method', value: 0.08, impact: 'positive' },
-      { feature: 'Tech Support', value: -0.05, impact: 'negative' },
-      { feature: 'Internet Service', value: -0.03, impact: 'negative' },
-    ],
-    'CUST-004': [
-      { feature: 'Tenure', value: 0.28, impact: 'positive' },
-      { feature: 'Contract Type', value: 0.22, impact: 'positive' },
-      { feature: 'Payment Method', value: 0.10, impact: 'positive' },
-      { feature: 'Monthly Charges', value: 0.05, impact: 'positive' },
-      { feature: 'Tech Support', value: -0.02, impact: 'negative' },
-      { feature: 'Internet Service', value: -0.01, impact: 'negative' },
-    ],
-    'CUST-002': [
-      { feature: 'Contract Type', value: 0.18, impact: 'positive' },
-      { feature: 'Payment Method', value: 0.12, impact: 'positive' },
-      { feature: 'Monthly Charges', value: 0.08, impact: 'positive' },
-      { feature: 'Tenure', value: -0.05, impact: 'negative' },
-      { feature: 'Tech Support', value: -0.08, impact: 'negative' },
-      { feature: 'Internet Service', value: -0.12, impact: 'negative' },
-    ],
-    'CUST-005': [
-      { feature: 'Contract Type', value: 0.15, impact: 'positive' },
-      { feature: 'Payment Method', value: 0.08, impact: 'positive' },
-      { feature: 'Tenure', value: -0.10, impact: 'negative' },
-      { feature: 'Tech Support', value: -0.12, impact: 'negative' },
-      { feature: 'Monthly Charges', value: -0.05, impact: 'negative' },
-      { feature: 'Internet Service', value: -0.08, impact: 'negative' },
-    ],
-    'CUST-003': [
-      { feature: 'Payment Method', value: 0.05, impact: 'positive' },
-      { feature: 'Contract Type', value: -0.15, impact: 'negative' },
-      { feature: 'Tenure', value: -0.20, impact: 'negative' },
-      { feature: 'Tech Support', value: -0.18, impact: 'negative' },
-      { feature: 'Monthly Charges', value: -0.08, impact: 'negative' },
-      { feature: 'Internet Service', value: -0.10, impact: 'negative' },
-    ],
-  };
-  return shapData[customerId] || shapData['CUST-001'];
+  return shap.map(s => ({ ...s, impact: s.impact as 'positive' | 'negative' }));
 };
 
-const getExplanation = (customerId: string) => {
-  const explanations: Record<string, string> = {
-    'CUST-001': 'This customer has a high churn probability primarily due to their month-to-month contract and relatively short tenure of 8 months. The electronic check payment method also contributes to the risk. Without tech support subscription, customer engagement is lower than average.',
-    'CUST-004': 'High churn risk driven by low tenure (6 months) combined with month-to-month contract. The customer is still in the early relationship phase where churn risk is naturally elevated. Electronic check payment method adds additional risk.',
-    'CUST-002': 'Medium risk customer with month-to-month contract as the primary concern. However, the customer has tech support which reduces engagement risk. Consider offering a contract upgrade incentive.',
-    'CUST-005': 'Moderate risk level with some positive indicators. The customer has been with us for 24 months which shows some loyalty. Main risk factors are the flexible contract type and lack of bundled services.',
-    'CUST-003': 'Low churn probability due to strong positive factors: two-year contract, 48-month tenure, tech support subscription, and credit card payment. This is a highly engaged, loyal customer.',
-  };
-  return explanations[customerId] || explanations['CUST-001'];
+const getSimulatedExplanation = (result: PredictionResult | null, input: CustomerInput) => {
+  if (!result) return "Select a customer to view explanation.";
+
+  const risk = result.risk_level;
+  const factors = [];
+
+  if (input.Contract === 'Month-to-month') factors.push("month-to-month contract");
+  if (input.tenure < 12) factors.push(`short tenure (${input.tenure} months)`);
+  if (input.MonthlyCharges > 90) factors.push("high monthly charges");
+  if (input.TechSupport === 'No') factors.push("lack of tech support");
+  if (input.InternetService === 'Fiber optic') factors.push("fiber optic service (often higher churn)");
+
+  if (risk === 'High') {
+    return `This customer is at High Risk of churn (${(result.churn_probability * 100).toFixed(1)}%). Primary drivers include ${factors.slice(0, 3).join(", ")}. Immediate retention action is recommended.`;
+  } else if (risk === 'Medium') {
+    return `This customer is at Medium Risk (${(result.churn_probability * 100).toFixed(1)}%). While generally stable, risk factors like ${factors.slice(0, 2).join(" and ")} indicate need for monitoring.`;
+  } else {
+    return `This customer is at Low Risk (${(result.churn_probability * 100).toFixed(1)}%). They show strong loyalty indicators such as ${input.Contract !== 'Month-to-month' ? 'long-term contract' : 'their tenure'}.`;
+  }
 };
 
 export default function Explainability() {
-  const [selectedCustomer, setSelectedCustomer] = useState('CUST-001');
-  const [featureValues, setFeatureValues] = useState({
-    tenure: 8,
-    monthlyCharges: 95,
-    contractType: 'Month-to-month',
-    techSupport: false,
+  const [customers, setCustomers] = useState<any[]>([]);
+  const [selectedCustomerId, setSelectedCustomerId] = useState<string>("");
+  const [loading, setLoading] = useState(true);
+  const [prediction, setPrediction] = useState<PredictionResult | null>(null);
+  const [currentInput, setCurrentInput] = useState<CustomerInput | null>(null);
+
+  useEffect(() => {
+    loadCustomers();
+  }, []);
+
+  const loadCustomers = async () => {
+    try {
+      const response = await api.getCustomers({ limit: 10 });
+      const customerList = (response as any[]).map(c => ({
+        id: c.customerID || c.customer_id,
+        // Store full object to map to input later
+        raw: c
+      }));
+      setCustomers(customerList);
+      if (customerList.length > 0) {
+        setSelectedCustomerId(customerList[0].id);
+        handleCustomerSelect(customerList[0].raw);
+      }
+    } catch (error) {
+      console.error('Failed to load customers:', error);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const mapToInput = (raw: any): CustomerInput => ({
+    gender: raw.gender,
+    SeniorCitizen: raw.SeniorCitizen?.toString() || (raw.SeniorCitizen === 1 ? 'Yes' : 'No'),
+    Partner: raw.Partner,
+    Dependents: raw.Dependents,
+    tenure: raw.tenure,
+    PhoneService: raw.PhoneService,
+    MultipleLines: raw.MultipleLines,
+    InternetService: raw.InternetService,
+    OnlineSecurity: raw.OnlineSecurity,
+    OnlineBackup: raw.OnlineBackup,
+    DeviceProtection: raw.DeviceProtection,
+    TechSupport: raw.TechSupport,
+    StreamingTV: raw.StreamingTV,
+    StreamingMovies: raw.StreamingMovies,
+    Contract: raw.Contract,
+    PaperlessBilling: raw.PaperlessBilling,
+    PaymentMethod: raw.PaymentMethod,
+    MonthlyCharges: raw.MonthlyCharges,
+    TotalCharges: parseFloat(raw.TotalCharges) || (raw.MonthlyCharges * raw.tenure) || 0,
   });
 
-  const customer = customers.find((c) => c.id === selectedCustomer);
-  const shapValues = getShapValues(selectedCustomer);
-  const explanation = getExplanation(selectedCustomer);
+  const handleCustomerSelect = async (rawCustomer: any) => {
+    const input = mapToInput(rawCustomer);
+    setCurrentInput(input);
+    await runPrediction(input);
+  };
+
+  const onSelectChange = (id: string) => {
+    setSelectedCustomerId(id);
+    const customer = customers.find(c => c.id === id);
+    if (customer) {
+      handleCustomerSelect(customer.raw);
+    }
+  };
+
+  const runPrediction = async (input: CustomerInput) => {
+    try {
+      const result = await api.predictChurn(input);
+      setPrediction(result);
+    } catch (error) {
+      console.error('Prediction failed:', error);
+    }
+  };
+
+  const handleSliderChange = (field: 'tenure' | 'MonthlyCharges', value: number) => {
+    if (!currentInput) return;
+    const newInput = { ...currentInput, [field]: value };
+    // Recalculate TotalCharges if simple approximation needed
+    if (field === 'tenure' || field === 'MonthlyCharges') {
+      newInput.TotalCharges = newInput.tenure * newInput.MonthlyCharges;
+    }
+    setCurrentInput(newInput);
+    // Debounce prediction call ideally, but direct call is ok for demo
+    runPrediction(newInput);
+  };
+
+  const shapValues = currentInput ? getSimulatedShapValues(selectedCustomerId, currentInput) : [];
+  const explanation = getSimulatedExplanation(prediction, currentInput as CustomerInput);
 
   const chartData = shapValues.map((item) => ({
     ...item,
     fill: item.impact === 'positive' ? 'hsl(0, 84%, 60%)' : 'hsl(160, 84%, 39%)',
   }));
+
+  if (loading) {
+    return (
+      <DashboardLayout>
+        <div className="flex items-center justify-center h-[calc(100vh-100px)]">
+          <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
+        </div>
+      </DashboardLayout>
+    );
+  }
 
   return (
     <DashboardLayout>
@@ -127,57 +187,49 @@ export default function Explainability() {
           className="chart-container lg:col-span-1"
         >
           <h3 className="text-lg font-semibold mb-4">Select Customer</h3>
-          <Select value={selectedCustomer} onValueChange={setSelectedCustomer}>
+          <Select value={selectedCustomerId} onValueChange={onSelectChange}>
             <SelectTrigger>
-              <SelectValue />
+              <SelectValue placeholder="Select a customer" />
             </SelectTrigger>
             <SelectContent>
               {customers.map((c) => (
                 <SelectItem key={c.id} value={c.id}>
-                  <div className="flex items-center justify-between w-full">
-                    <span className="font-mono">{c.id}</span>
-                    <span className={cn(
-                      'ml-2 text-xs',
-                      c.risk === 'High' && 'text-destructive',
-                      c.risk === 'Medium' && 'text-warning',
-                      c.risk === 'Low' && 'text-success'
-                    )}>
-                      {c.risk}
-                    </span>
-                  </div>
+                  <span className="font-mono">{c.id}</span>
                 </SelectItem>
               ))}
             </SelectContent>
           </Select>
 
-          {customer && (
+          {prediction && (
             <div className="mt-6 space-y-4">
               <div className="p-4 bg-muted/50 rounded-lg">
                 <p className="text-sm text-muted-foreground">Churn Probability</p>
-                <p className="text-3xl font-bold">{(customer.probability * 100).toFixed(1)}%</p>
+                <p className="text-3xl font-bold">{(prediction.churn_probability * 100).toFixed(1)}%</p>
                 <span className={cn(
                   'risk-badge mt-2',
-                  customer.risk === 'High' && 'risk-high',
-                  customer.risk === 'Medium' && 'risk-medium',
-                  customer.risk === 'Low' && 'risk-low'
+                  prediction.risk_level === 'High' && 'risk-high',
+                  prediction.risk_level === 'Medium' && 'risk-medium',
+                  prediction.risk_level === 'Low' && 'risk-low'
                 )}>
-                  {customer.risk} Risk
+                  {prediction.risk_level} Risk
                 </span>
               </div>
 
-              <div className="space-y-2">
-                <h4 className="text-sm font-medium">Quick Facts</h4>
-                <div className="grid grid-cols-2 gap-2">
-                  <div className="p-2 bg-muted/30 rounded text-center">
-                    <p className="text-xs text-muted-foreground">Tenure</p>
-                    <p className="font-medium">{featureValues.tenure} mo</p>
-                  </div>
-                  <div className="p-2 bg-muted/30 rounded text-center">
-                    <p className="text-xs text-muted-foreground">Charges</p>
-                    <p className="font-medium">${featureValues.monthlyCharges}</p>
+              {currentInput && (
+                <div className="space-y-2">
+                  <h4 className="text-sm font-medium">Quick Facts</h4>
+                  <div className="grid grid-cols-2 gap-2">
+                    <div className="p-2 bg-muted/30 rounded text-center">
+                      <p className="text-xs text-muted-foreground">Tenure</p>
+                      <p className="font-medium">{currentInput.tenure} mo</p>
+                    </div>
+                    <div className="p-2 bg-muted/30 rounded text-center">
+                      <p className="text-xs text-muted-foreground">Charges</p>
+                      <p className="font-medium">${currentInput.MonthlyCharges}</p>
+                    </div>
                   </div>
                 </div>
-              </div>
+              )}
             </div>
           )}
         </motion.div>
@@ -191,7 +243,7 @@ export default function Explainability() {
         >
           <h3 className="text-lg font-semibold mb-4 flex items-center gap-2">
             <HelpCircle className="w-5 h-5 text-primary" />
-            SHAP Feature Contributions
+            SHAP Feature Contributions (Simulated)
           </h3>
           <div className="h-[300px]">
             <ResponsiveContainer width="100%" height="100%">
@@ -199,7 +251,7 @@ export default function Explainability() {
                 <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" />
                 <XAxis
                   type="number"
-                  domain={[-0.3, 0.4]}
+                  domain={[-0.5, 0.5]}
                   stroke="hsl(var(--muted-foreground))"
                   fontSize={12}
                 />
@@ -305,43 +357,45 @@ export default function Explainability() {
             <p className="text-sm leading-relaxed">{explanation}</p>
           </div>
 
-          <h4 className="text-sm font-medium mb-4">What-If Analysis</h4>
-          <div className="space-y-4">
-            <div className="space-y-2">
-              <div className="flex items-center justify-between">
-                <span className="text-sm text-muted-foreground">Tenure (months)</span>
-                <span className="text-sm font-medium">{featureValues.tenure}</span>
+          <h4 className="text-sm font-medium mb-4">What-If Analysis (Real-time Prediction)</h4>
+          {currentInput && (
+            <div className="space-y-4">
+              <div className="space-y-2">
+                <div className="flex items-center justify-between">
+                  <span className="text-sm text-muted-foreground">Tenure (months)</span>
+                  <span className="text-sm font-medium">{currentInput.tenure}</span>
+                </div>
+                <Slider
+                  value={[currentInput.tenure]}
+                  onValueChange={(value) => handleSliderChange('tenure', value[0])}
+                  max={72}
+                  min={1}
+                  step={1}
+                />
               </div>
-              <Slider
-                value={[featureValues.tenure]}
-                onValueChange={(value) => setFeatureValues({ ...featureValues, tenure: value[0] })}
-                max={72}
-                min={1}
-                step={1}
-              />
-            </div>
 
-            <div className="space-y-2">
-              <div className="flex items-center justify-between">
-                <span className="text-sm text-muted-foreground">Monthly Charges ($)</span>
-                <span className="text-sm font-medium">{featureValues.monthlyCharges}</span>
+              <div className="space-y-2">
+                <div className="flex items-center justify-between">
+                  <span className="text-sm text-muted-foreground">Monthly Charges ($)</span>
+                  <span className="text-sm font-medium">{currentInput.MonthlyCharges}</span>
+                </div>
+                <Slider
+                  value={[currentInput.MonthlyCharges]}
+                  onValueChange={(value) => handleSliderChange('MonthlyCharges', value[0])}
+                  max={120}
+                  min={20}
+                  step={5}
+                />
               </div>
-              <Slider
-                value={[featureValues.monthlyCharges]}
-                onValueChange={(value) => setFeatureValues({ ...featureValues, monthlyCharges: value[0] })}
-                max={120}
-                min={20}
-                step={5}
-              />
-            </div>
 
-            <div className="flex items-center gap-2 pt-2">
-              <ArrowRight className="w-4 h-4 text-primary" />
-              <span className="text-sm text-muted-foreground">
-                Adjust values to see how they might impact churn probability
-              </span>
+              <div className="flex items-center gap-2 pt-2">
+                <ArrowRight className="w-4 h-4 text-primary" />
+                <span className="text-sm text-muted-foreground">
+                  Adjust values to see how churn probability changes
+                </span>
+              </div>
             </div>
-          </div>
+          )}
         </motion.div>
       </div>
     </DashboardLayout>

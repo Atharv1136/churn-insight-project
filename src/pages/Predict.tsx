@@ -25,79 +25,56 @@ import {
 import { Switch } from '@/components/ui/switch';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { cn } from '@/lib/utils';
-import type { PredictionInput, PredictionResult } from '@/types/churn';
+import { api, type CustomerInput, type PredictionResult } from '@/lib/api';
 
 export default function Predict() {
   const [loading, setLoading] = useState(false);
-  const [formData, setFormData] = useState<PredictionInput>({
+  const [formData, setFormData] = useState<CustomerInput>({
+    gender: 'Male',
+    SeniorCitizen: 'No',
+    Partner: 'No',
+    Dependents: 'No',
     tenure: 12,
-    monthly_charges: 70,
-    contract_type: 'Month-to-month',
-    payment_method: 'Electronic check',
-    internet_service: 'Fiber optic',
-    tech_support: false,
+    PhoneService: 'Yes',
+    MultipleLines: 'No',
+    InternetService: 'Fiber optic',
+    OnlineSecurity: 'No',
+    OnlineBackup: 'No',
+    DeviceProtection: 'No',
+    TechSupport: 'No',
+    StreamingTV: 'No',
+    StreamingMovies: 'No',
+    Contract: 'Month-to-month',
+    PaperlessBilling: 'Yes',
+    PaymentMethod: 'Electronic check',
+    MonthlyCharges: 70.0,
+    TotalCharges: 840.0,
   });
   const [result, setResult] = useState<PredictionResult | null>(null);
   const [uploadedFile, setUploadedFile] = useState<File | null>(null);
   const [bulkResults, setBulkResults] = useState<Array<{ id: string; probability: number; risk: string }>>([]);
 
+  const handleInputChange = (field: keyof CustomerInput, value: string | number) => {
+    setFormData(prev => ({ ...prev, [field]: value }));
+
+    // Auto-calculate TotalCharges
+    if (field === 'tenure' || field === 'MonthlyCharges') {
+      const tenure = field === 'tenure' ? Number(value) : formData.tenure;
+      const monthly = field === 'MonthlyCharges' ? Number(value) : formData.MonthlyCharges;
+      setFormData(prev => ({ ...prev, TotalCharges: tenure * monthly }));
+    }
+  };
+
   const handlePredict = async () => {
     setLoading(true);
-    // Simulate API call
-    await new Promise((resolve) => setTimeout(resolve, 1500));
-    
-    // Mock prediction based on input features
-    const riskScore = calculateRiskScore(formData);
-    const probability = Math.min(0.95, Math.max(0.05, riskScore));
-    
-    setResult({
-      churn_probability: probability,
-      risk_level: probability >= 0.7 ? 'High' : probability >= 0.4 ? 'Medium' : 'Low',
-      top_reasons: getTopReasons(formData),
-      recommended_actions: getRecommendedActions(probability),
-    });
-    setLoading(false);
-  };
-
-  const calculateRiskScore = (data: PredictionInput): number => {
-    let score = 0.3;
-    if (data.contract_type === 'Month-to-month') score += 0.25;
-    if (data.tenure < 12) score += 0.15;
-    if (data.monthly_charges > 80) score += 0.1;
-    if (!data.tech_support) score += 0.1;
-    if (data.payment_method === 'Electronic check') score += 0.1;
-    return score;
-  };
-
-  const getTopReasons = (data: PredictionInput): string[] => {
-    const reasons: string[] = [];
-    if (data.contract_type === 'Month-to-month') reasons.push('Month-to-month contract increases flexibility to leave');
-    if (data.tenure < 12) reasons.push('Low tenure indicates less customer loyalty');
-    if (data.monthly_charges > 80) reasons.push('High monthly charges may cause price sensitivity');
-    if (!data.tech_support) reasons.push('No tech support subscription reduces engagement');
-    if (data.payment_method === 'Electronic check') reasons.push('Electronic check users show higher churn rates');
-    return reasons.slice(0, 3);
-  };
-
-  const getRecommendedActions = (probability: number): string[] => {
-    if (probability >= 0.7) {
-      return [
-        'Offer immediate discount or promotional rate',
-        'Assign dedicated account manager',
-        'Upgrade service tier at no extra cost',
-      ];
-    } else if (probability >= 0.4) {
-      return [
-        'Send personalized retention offer',
-        'Schedule proactive check-in call',
-        'Recommend relevant add-on services',
-      ];
+    try {
+      const prediction = await api.predictChurn(formData);
+      setResult(prediction);
+    } catch (error) {
+      console.error('Prediction failed:', error);
+    } finally {
+      setLoading(false);
     }
-    return [
-      'Continue standard engagement',
-      'Consider loyalty rewards program',
-      'Monitor for any service issues',
-    ];
   };
 
   const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -110,16 +87,9 @@ export default function Predict() {
   const handleBulkPredict = async () => {
     if (!uploadedFile) return;
     setLoading(true);
+    // TODO: Implement actual bulk prediction API
+    // For now, simulating delay
     await new Promise((resolve) => setTimeout(resolve, 2000));
-    
-    // Mock bulk results
-    setBulkResults([
-      { id: 'CUST-001', probability: 0.82, risk: 'High' },
-      { id: 'CUST-002', probability: 0.45, risk: 'Medium' },
-      { id: 'CUST-003', probability: 0.23, risk: 'Low' },
-      { id: 'CUST-004', probability: 0.71, risk: 'High' },
-      { id: 'CUST-005', probability: 0.55, risk: 'Medium' },
-    ]);
     setLoading(false);
   };
 
@@ -161,91 +131,188 @@ export default function Predict() {
                 Customer Features
               </h3>
 
-              <div className="space-y-4">
-                <div className="grid grid-cols-2 gap-4">
-                  <div className="space-y-2">
-                    <Label htmlFor="tenure">Tenure (months)</Label>
-                    <Input
-                      id="tenure"
-                      type="number"
-                      value={formData.tenure}
-                      onChange={(e) => setFormData({ ...formData, tenure: parseInt(e.target.value) || 0 })}
-                      min={0}
-                      max={72}
-                    />
+              <div className="space-y-6 h-[600px] overflow-y-auto pr-4">
+                {/* Demographics */}
+                <div className="space-y-4">
+                  <h4 className="font-medium text-sm text-muted-foreground border-b pb-2">Demographics</h4>
+                  <div className="grid grid-cols-2 gap-4">
+                    <div className="space-y-2">
+                      <Label>Gender</Label>
+                      <Select value={formData.gender} onValueChange={(v) => handleInputChange('gender', v)}>
+                        <SelectTrigger><SelectValue /></SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="Male">Male</SelectItem>
+                          <SelectItem value="Female">Female</SelectItem>
+                        </SelectContent>
+                      </Select>
+                    </div>
+                    <div className="space-y-2">
+                      <Label>Senior Citizen</Label>
+                      <Select value={formData.SeniorCitizen} onValueChange={(v) => handleInputChange('SeniorCitizen', v)}>
+                        <SelectTrigger><SelectValue /></SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="Yes">Yes</SelectItem>
+                          <SelectItem value="No">No</SelectItem>
+                        </SelectContent>
+                      </Select>
+                    </div>
+                    <div className="space-y-2">
+                      <Label>Partner</Label>
+                      <Select value={formData.Partner} onValueChange={(v) => handleInputChange('Partner', v)}>
+                        <SelectTrigger><SelectValue /></SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="Yes">Yes</SelectItem>
+                          <SelectItem value="No">No</SelectItem>
+                        </SelectContent>
+                      </Select>
+                    </div>
+                    <div className="space-y-2">
+                      <Label>Dependents</Label>
+                      <Select value={formData.Dependents} onValueChange={(v) => handleInputChange('Dependents', v)}>
+                        <SelectTrigger><SelectValue /></SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="Yes">Yes</SelectItem>
+                          <SelectItem value="No">No</SelectItem>
+                        </SelectContent>
+                      </Select>
+                    </div>
                   </div>
-                  <div className="space-y-2">
-                    <Label htmlFor="charges">Monthly Charges ($)</Label>
-                    <Input
-                      id="charges"
-                      type="number"
-                      value={formData.monthly_charges}
-                      onChange={(e) => setFormData({ ...formData, monthly_charges: parseFloat(e.target.value) || 0 })}
-                      min={0}
-                      step={0.01}
-                    />
+                </div>
+
+                {/* Services */}
+                <div className="space-y-4">
+                  <h4 className="font-medium text-sm text-muted-foreground border-b pb-2">Services</h4>
+                  <div className="grid grid-cols-2 gap-4">
+                    <div className="space-y-2">
+                      <Label>Internet Service</Label>
+                      <Select value={formData.InternetService} onValueChange={(v) => handleInputChange('InternetService', v)}>
+                        <SelectTrigger><SelectValue /></SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="DSL">DSL</SelectItem>
+                          <SelectItem value="Fiber optic">Fiber optic</SelectItem>
+                          <SelectItem value="No">No</SelectItem>
+                        </SelectContent>
+                      </Select>
+                    </div>
+                    <div className="space-y-2">
+                      <Label>Phone Service</Label>
+                      <Select value={formData.PhoneService} onValueChange={(v) => handleInputChange('PhoneService', v)}>
+                        <SelectTrigger><SelectValue /></SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="Yes">Yes</SelectItem>
+                          <SelectItem value="No">No</SelectItem>
+                        </SelectContent>
+                      </Select>
+                    </div>
+                    <div className="space-y-2">
+                      <Label>Multiple Lines</Label>
+                      <Select value={formData.MultipleLines} onValueChange={(v) => handleInputChange('MultipleLines', v)}>
+                        <SelectTrigger><SelectValue /></SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="Yes">Yes</SelectItem>
+                          <SelectItem value="No">No</SelectItem>
+                          <SelectItem value="No phone service">No phone service</SelectItem>
+                        </SelectContent>
+                      </Select>
+                    </div>
+                    <div className="space-y-2">
+                      <Label>Tech Support</Label>
+                      <Select value={formData.TechSupport} onValueChange={(v) => handleInputChange('TechSupport', v)}>
+                        <SelectTrigger><SelectValue /></SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="Yes">Yes</SelectItem>
+                          <SelectItem value="No">No</SelectItem>
+                          <SelectItem value="No internet service">No internet service</SelectItem>
+                        </SelectContent>
+                      </Select>
+                    </div>
+                  </div>
+
+                  {/* Additional Services Toggles */}
+                  <div className="grid grid-cols-2 gap-4">
+                    {['OnlineSecurity', 'OnlineBackup', 'DeviceProtection', 'StreamingTV', 'StreamingMovies'].map((service) => (
+                      <div key={service} className="space-y-2">
+                        <Label>{service.replace(/([A-Z])/g, ' $1').trim()}</Label>
+                        <Select value={formData[service as keyof CustomerInput] as string} onValueChange={(v) => handleInputChange(service as keyof CustomerInput, v)}>
+                          <SelectTrigger><SelectValue /></SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="Yes">Yes</SelectItem>
+                            <SelectItem value="No">No</SelectItem>
+                            <SelectItem value="No internet service">No internet service</SelectItem>
+                          </SelectContent>
+                        </Select>
+                      </div>
+                    ))}
                   </div>
                 </div>
 
-                <div className="space-y-2">
-                  <Label>Contract Type</Label>
-                  <Select
-                    value={formData.contract_type}
-                    onValueChange={(value) => setFormData({ ...formData, contract_type: value })}
-                  >
-                    <SelectTrigger>
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="Month-to-month">Month-to-month</SelectItem>
-                      <SelectItem value="One year">One year</SelectItem>
-                      <SelectItem value="Two year">Two year</SelectItem>
-                    </SelectContent>
-                  </Select>
-                </div>
-
-                <div className="space-y-2">
-                  <Label>Payment Method</Label>
-                  <Select
-                    value={formData.payment_method}
-                    onValueChange={(value) => setFormData({ ...formData, payment_method: value })}
-                  >
-                    <SelectTrigger>
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="Electronic check">Electronic check</SelectItem>
-                      <SelectItem value="Mailed check">Mailed check</SelectItem>
-                      <SelectItem value="Bank transfer">Bank transfer</SelectItem>
-                      <SelectItem value="Credit card">Credit card</SelectItem>
-                    </SelectContent>
-                  </Select>
-                </div>
-
-                <div className="space-y-2">
-                  <Label>Internet Service</Label>
-                  <Select
-                    value={formData.internet_service}
-                    onValueChange={(value) => setFormData({ ...formData, internet_service: value })}
-                  >
-                    <SelectTrigger>
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="DSL">DSL</SelectItem>
-                      <SelectItem value="Fiber optic">Fiber optic</SelectItem>
-                      <SelectItem value="No">No internet</SelectItem>
-                    </SelectContent>
-                  </Select>
-                </div>
-
-                <div className="flex items-center justify-between py-2">
-                  <Label htmlFor="tech-support">Tech Support</Label>
-                  <Switch
-                    id="tech-support"
-                    checked={formData.tech_support}
-                    onCheckedChange={(checked) => setFormData({ ...formData, tech_support: checked })}
-                  />
+                {/* Account & Billing */}
+                <div className="space-y-4">
+                  <h4 className="font-medium text-sm text-muted-foreground border-b pb-2">Account & Billing</h4>
+                  <div className="grid grid-cols-2 gap-4">
+                    <div className="space-y-2">
+                      <Label>Tenure (months)</Label>
+                      <Input
+                        type="number"
+                        value={formData.tenure}
+                        onChange={(e) => handleInputChange('tenure', parseInt(e.target.value) || 0)}
+                        min={0}
+                      />
+                    </div>
+                    <div className="space-y-2">
+                      <Label>Contract</Label>
+                      <Select value={formData.Contract} onValueChange={(v) => handleInputChange('Contract', v)}>
+                        <SelectTrigger><SelectValue /></SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="Month-to-month">Month-to-month</SelectItem>
+                          <SelectItem value="One year">One year</SelectItem>
+                          <SelectItem value="Two year">Two year</SelectItem>
+                        </SelectContent>
+                      </Select>
+                    </div>
+                    <div className="space-y-2">
+                      <Label>Monthly Charges ($)</Label>
+                      <Input
+                        type="number"
+                        value={formData.MonthlyCharges}
+                        onChange={(e) => handleInputChange('MonthlyCharges', parseFloat(e.target.value) || 0)}
+                        min={0}
+                        step={0.01}
+                      />
+                    </div>
+                    <div className="space-y-2">
+                      <Label>Total Charges ($)</Label>
+                      <Input
+                        type="number"
+                        value={formData.TotalCharges}
+                        onChange={(e) => handleInputChange('TotalCharges', parseFloat(e.target.value) || 0)}
+                        min={0}
+                        step={0.01}
+                      />
+                    </div>
+                    <div className="space-y-2">
+                      <Label>Payment Method</Label>
+                      <Select value={formData.PaymentMethod} onValueChange={(v) => handleInputChange('PaymentMethod', v)}>
+                        <SelectTrigger><SelectValue /></SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="Electronic check">Electronic check</SelectItem>
+                          <SelectItem value="Mailed check">Mailed check</SelectItem>
+                          <SelectItem value="Bank transfer (automatic)">Bank transfer (automatic)</SelectItem>
+                          <SelectItem value="Credit card (automatic)">Credit card (automatic)</SelectItem>
+                        </SelectContent>
+                      </Select>
+                    </div>
+                    <div className="space-y-2">
+                      <Label>Paperless Billing</Label>
+                      <Select value={formData.PaperlessBilling} onValueChange={(v) => handleInputChange('PaperlessBilling', v)}>
+                        <SelectTrigger><SelectValue /></SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="Yes">Yes</SelectItem>
+                          <SelectItem value="No">No</SelectItem>
+                        </SelectContent>
+                      </Select>
+                    </div>
+                  </div>
                 </div>
 
                 <Button
@@ -324,14 +391,20 @@ export default function Predict() {
                       Top Contributing Factors
                     </h3>
                     <ul className="space-y-3">
-                      {result.top_reasons.map((reason, index) => (
-                        <li key={index} className="flex items-start gap-3">
-                          <span className="w-6 h-6 rounded-full bg-primary/10 text-primary flex items-center justify-center text-sm font-medium flex-shrink-0">
-                            {index + 1}
-                          </span>
-                          <span className="text-sm">{reason}</span>
-                        </li>
-                      ))}
+                      {result.top_features?.map((feature, index) => (
+                        <div key={index}>
+                          <div className="flex justify-between text-sm mb-1">
+                            <span className="font-medium">{feature.feature}</span>
+                            <span className="text-muted-foreground">{(feature.contribution * 100).toFixed(1)}%</span>
+                          </div>
+                          <div className="w-full bg-secondary rounded-full h-2">
+                            <div
+                              className="bg-primary h-2 rounded-full"
+                              style={{ width: `${Math.abs(feature.contribution) * 100}%` }}
+                            />
+                          </div>
+                        </div>
+                      )) || <p className="text-muted-foreground text-sm">No feature data available</p>}
                     </ul>
                   </div>
 
@@ -342,12 +415,12 @@ export default function Predict() {
                       Recommended Actions
                     </h3>
                     <ul className="space-y-3">
-                      {result.recommended_actions.map((action, index) => (
+                      {result.recommendations?.map((action, index) => (
                         <li key={index} className="flex items-start gap-3">
                           <CheckCircle className="w-5 h-5 text-success flex-shrink-0 mt-0.5" />
                           <span className="text-sm">{action}</span>
                         </li>
-                      ))}
+                      )) || <p className="text-muted-foreground text-sm">No recommendations available</p>}
                     </ul>
                   </div>
                 </>
@@ -376,7 +449,7 @@ export default function Predict() {
               Upload CSV File
             </h3>
             <p className="text-sm text-muted-foreground mb-4">
-              Upload a CSV file with customer data. Required columns: tenure, monthly_charges, contract_type, payment_method, internet_service, tech_support
+              Upload a CSV file with customer data.
             </p>
 
             <div className="border-2 border-dashed border-border rounded-xl p-8 text-center">
@@ -418,43 +491,6 @@ export default function Predict() {
               )}
             </div>
           </motion.div>
-
-          {bulkResults.length > 0 && (
-            <motion.div
-              initial={{ opacity: 0, y: 20 }}
-              animate={{ opacity: 1, y: 0 }}
-              className="chart-container"
-            >
-              <h3 className="text-lg font-semibold mb-4">Bulk Prediction Results</h3>
-              <table className="data-table">
-                <thead>
-                  <tr>
-                    <th>Customer ID</th>
-                    <th>Churn Probability</th>
-                    <th>Risk Level</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {bulkResults.map((result) => (
-                    <tr key={result.id}>
-                      <td><span className="font-mono">{result.id}</span></td>
-                      <td>{(result.probability * 100).toFixed(1)}%</td>
-                      <td>
-                        <span className={cn(
-                          'risk-badge',
-                          result.risk === 'High' && 'risk-high',
-                          result.risk === 'Medium' && 'risk-medium',
-                          result.risk === 'Low' && 'risk-low'
-                        )}>
-                          {result.risk}
-                        </span>
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </motion.div>
-          )}
         </TabsContent>
       </Tabs>
     </DashboardLayout>

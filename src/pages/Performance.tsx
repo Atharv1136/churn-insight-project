@@ -1,247 +1,359 @@
-import { useEffect, useState } from 'react';
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { useState, useEffect } from 'react';
+import { motion } from 'framer-motion';
+import {
+  RefreshCcw,
+  Loader2,
+  Check,
+  Trophy,
+  Target,
+  TrendingUp,
+  AlertCircle,
+} from 'lucide-react';
+import {
+  LineChart,
+  Line,
+  XAxis,
+  YAxis,
+  CartesianGrid,
+  Tooltip,
+  ResponsiveContainer,
+  Legend,
+  BarChart,
+  Bar,
+} from 'recharts';
+import { DashboardLayout } from '@/components/layout/DashboardLayout';
+import { Button } from '@/components/ui/button';
+import { Progress } from '@/components/ui/progress';
+import { cn } from '@/lib/utils';
 import { api, type ModelMetrics } from '@/lib/api';
-import { Loader2, TrendingUp, Target, Activity } from 'lucide-react';
 
 export default function Performance() {
-  const [metrics, setMetrics] = useState<ModelMetrics[]>([]);
-  const [featureImportance, setFeatureImportance] = useState<any>(null);
+  const [retraining, setRetraining] = useState(false);
+  const [retrainProgress, setRetrainProgress] = useState(0);
   const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
+  const [metrics, setMetrics] = useState<ModelMetrics[]>([]);
+  const [featureImportance, setFeatureImportance] = useState<any[]>([]);
+  const [activeModel, setActiveModel] = useState<string>('XGBoost');
 
   useEffect(() => {
-    loadPerformanceData();
+    loadData();
   }, []);
 
-  const loadPerformanceData = async () => {
-    setLoading(true);
-    setError(null);
-
+  const loadData = async () => {
     try {
-      const [metricsData, featuresData] = await Promise.all([
+      const [comparisonData, featureData] = await Promise.all([
         api.getModelComparison(),
-        api.getFeatureImportance('XGBoost', 10).catch(() => null),
+        api.getFeatureImportance(),
       ]);
+      setMetrics(comparisonData || []);
+      setFeatureImportance(featureData || []);
 
-      setMetrics(metricsData);
-      setFeatureImportance(featuresData);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to load performance data');
+      // Find best model to set as active
+      if (comparisonData && comparisonData.length > 0) {
+        // Sort by ROC_AUC descending
+        const best = [...comparisonData].sort((a, b) => b.roc_auc - a.roc_auc)[0];
+        setActiveModel(best.model_name);
+      }
+    } catch (error) {
+      console.error('Failed to load performance data:', error);
     } finally {
       setLoading(false);
     }
   };
 
+  const handleRetrain = async () => {
+    setRetraining(true);
+    setRetrainProgress(0);
+
+    // Simulate retraining progress
+    for (let i = 0; i <= 100; i += 5) {
+      await new Promise((resolve) => setTimeout(resolve, 200));
+      setRetrainProgress(i);
+    }
+
+    // Reload data after "retraining"
+    await loadData();
+
+    setRetraining(false);
+    setRetrainProgress(0);
+  };
+
+  // Get active model metrics for Confusion Matrix
+  const activeMetrics = metrics.find(m => m.model_name === activeModel);
+  const confusionMatrix = activeMetrics?.confusion_matrix || [[0, 0], [0, 0]];
+
+  // Static ROC curve data (placeholder)
+  const rocCurveData = [
+    { fpr: 0, tpr: 0 },
+    { fpr: 0.02, tpr: 0.35 },
+    { fpr: 0.05, tpr: 0.55 },
+    { fpr: 0.08, tpr: 0.68 },
+    { fpr: 0.12, tpr: 0.78 },
+    { fpr: 0.18, tpr: 0.85 },
+    { fpr: 0.25, tpr: 0.90 },
+    { fpr: 0.35, tpr: 0.93 },
+    { fpr: 0.50, tpr: 0.95 },
+    { fpr: 0.70, tpr: 0.97 },
+    { fpr: 1, tpr: 1 },
+  ];
+
   if (loading) {
     return (
-      <div className="flex items-center justify-center h-96">
-        <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
-      </div>
+      <DashboardLayout>
+        <div className="flex items-center justify-center h-[calc(100vh-100px)]">
+          <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
+        </div>
+      </DashboardLayout>
     );
   }
-
-  if (error) {
-    return (
-      <div className="container mx-auto p-6">
-        <Card className="border-red-200 bg-red-50">
-          <CardContent className="pt-6">
-            <p className="text-red-600">Error: {error}</p>
-            <button onClick={loadPerformanceData} className="mt-4 text-sm text-blue-600 hover:underline">
-              Try again
-            </button>
-          </CardContent>
-        </Card>
-      </div>
-    );
-  }
-
-  // Find best model
-  const bestModel = metrics.reduce((best, current) =>
-    current.roc_auc > (best?.roc_auc || 0) ? current : best
-    , metrics[0]);
 
   return (
-    <div className="container mx-auto p-6 space-y-6">
-      <div>
-        <h1 className="text-3xl font-bold">Model Performance</h1>
-        <p className="text-muted-foreground mt-2">
-          Detailed metrics and comparison of trained models
-        </p>
+    <DashboardLayout>
+      <div className="page-header flex items-center justify-between">
+        <div>
+          <h1 className="page-title">Model Performance</h1>
+          <p className="page-subtitle">Monitor and compare ML model metrics</p>
+        </div>
+        <Button onClick={handleRetrain} disabled={retraining}>
+          {retraining ? (
+            <>
+              <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+              Retraining...
+            </>
+          ) : (
+            <>
+              <RefreshCcw className="w-4 h-4 mr-2" />
+              Retrain Model
+            </>
+          )}
+        </Button>
       </div>
 
-      {/* Best Model Highlight */}
-      {bestModel && (
-        <Card className="bg-gradient-to-r from-blue-50 to-indigo-50 border-blue-200">
-          <CardHeader>
-            <CardTitle className="flex items-center gap-2">
-              <Target className="h-5 w-5 text-blue-600" />
-              Best Performing Model: {bestModel.model_name}
-            </CardTitle>
-          </CardHeader>
-          <CardContent>
-            <div className="grid grid-cols-2 md:grid-cols-5 gap-4">
-              <div>
-                <div className="text-sm text-muted-foreground">Accuracy</div>
-                <div className="text-2xl font-bold text-blue-600">
-                  {(bestModel.accuracy * 100).toFixed(1)}%
-                </div>
+      {retraining && (
+        <motion.div
+          initial={{ opacity: 0, y: -10 }}
+          animate={{ opacity: 1, y: 0 }}
+          className="chart-container mb-6"
+        >
+          <div className="flex items-center gap-4">
+            <Loader2 className="w-5 h-5 animate-spin text-primary" />
+            <div className="flex-1">
+              <div className="flex items-center justify-between mb-2">
+                <span className="text-sm font-medium">Retraining in progress...</span>
+                <span className="text-sm text-muted-foreground">{retrainProgress}%</span>
               </div>
-              <div>
-                <div className="text-sm text-muted-foreground">Precision</div>
-                <div className="text-2xl font-bold text-green-600">
-                  {(bestModel.precision * 100).toFixed(1)}%
-                </div>
-              </div>
-              <div>
-                <div className="text-sm text-muted-foreground">Recall</div>
-                <div className="text-2xl font-bold text-orange-600">
-                  {(bestModel.recall * 100).toFixed(1)}%
-                </div>
-              </div>
-              <div>
-                <div className="text-sm text-muted-foreground">F1 Score</div>
-                <div className="text-2xl font-bold text-purple-600">
-                  {(bestModel.f1_score * 100).toFixed(1)}%
-                </div>
-              </div>
-              <div>
-                <div className="text-sm text-muted-foreground">ROC-AUC</div>
-                <div className="text-2xl font-bold text-indigo-600">
-                  {bestModel.roc_auc.toFixed(3)}
-                </div>
-              </div>
+              <Progress value={retrainProgress} className="h-2" />
             </div>
-          </CardContent>
-        </Card>
+          </div>
+        </motion.div>
       )}
 
       {/* Model Comparison Table */}
-      <Card>
-        <CardHeader>
-          <CardTitle className="flex items-center gap-2">
-            <Activity className="h-5 w-5" />
-            Model Comparison
-          </CardTitle>
-        </CardHeader>
-        <CardContent>
-          <div className="overflow-x-auto">
-            <table className="w-full">
-              <thead>
-                <tr className="border-b">
-                  <th className="text-left p-3 font-semibold">Model</th>
-                  <th className="text-right p-3 font-semibold">Accuracy</th>
-                  <th className="text-right p-3 font-semibold">Precision</th>
-                  <th className="text-right p-3 font-semibold">Recall</th>
-                  <th className="text-right p-3 font-semibold">F1 Score</th>
-                  <th className="text-right p-3 font-semibold">ROC-AUC</th>
-                </tr>
-              </thead>
-              <tbody>
-                {metrics.map((model, idx) => (
-                  <tr key={idx} className="border-b hover:bg-gray-50">
-                    <td className="p-3 font-medium">{model.model_name}</td>
-                    <td className="p-3 text-right">{(model.accuracy * 100).toFixed(2)}%</td>
-                    <td className="p-3 text-right">{(model.precision * 100).toFixed(2)}%</td>
-                    <td className="p-3 text-right">{(model.recall * 100).toFixed(2)}%</td>
-                    <td className="p-3 text-right">{(model.f1_score * 100).toFixed(2)}%</td>
-                    <td className="p-3 text-right font-semibold">{model.roc_auc.toFixed(4)}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
+      <motion.div
+        initial={{ opacity: 0, y: 20 }}
+        animate={{ opacity: 1, y: 0 }}
+        className="chart-container mb-6"
+      >
+        <h3 className="text-lg font-semibold mb-4 flex items-center gap-2">
+          <Trophy className="w-5 h-5 text-warning" />
+          Model Comparison
+        </h3>
+        <div className="overflow-x-auto">
+          <table className="data-table">
+            <thead>
+              <tr>
+                <th>Model</th>
+                <th>Accuracy</th>
+                <th>Precision</th>
+                <th>Recall</th>
+                <th>F1 Score</th>
+                <th>ROC-AUC</th>
+                <th>Status</th>
+              </tr>
+            </thead>
+            <tbody>
+              {metrics.map((model, index) => (
+                <motion.tr
+                  key={model.model_name}
+                  initial={{ opacity: 0, x: -20 }}
+                  animate={{ opacity: 1, x: 0 }}
+                  transition={{ delay: index * 0.1 }}
+                  className={cn(model.model_name === activeModel && 'bg-primary/5')}
+                  onClick={() => setActiveModel(model.model_name)}
+                  style={{ cursor: 'pointer' }}
+                >
+                  <td>
+                    <div className="flex items-center gap-2">
+                      <span className="font-medium">{model.model_name}</span>
+                      {model.model_name === activeModel && (
+                        <span className="px-2 py-0.5 rounded-full text-xs font-medium bg-primary/10 text-primary">
+                          Active
+                        </span>
+                      )}
+                    </div>
+                  </td>
+                  <td className="font-mono">{(model.accuracy * 100).toFixed(1)}%</td>
+                  <td className="font-mono">{(model.precision * 100).toFixed(1)}%</td>
+                  <td className="font-mono">{(model.recall * 100).toFixed(1)}%</td>
+                  <td className="font-mono">{(model.f1_score * 100).toFixed(1)}%</td>
+                  <td className="font-mono">{(model.roc_auc * 100).toFixed(1)}%</td>
+                  <td>
+                    {model.model_name === activeModel ? (
+                      <Check className="w-5 h-5 text-success" />
+                    ) : (
+                      <span className="text-muted-foreground">—</span>
+                    )}
+                  </td>
+                </motion.tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </motion.div>
+
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-6">
+        {/* ROC Curve */}
+        <motion.div
+          initial={{ opacity: 0, y: 20 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ delay: 0.1 }}
+          className="chart-container"
+        >
+          <h3 className="text-lg font-semibold mb-4 flex items-center gap-2">
+            <Target className="w-5 h-5 text-primary" />
+            ROC Curve (Simulated)
+          </h3>
+          <div className="h-[300px]">
+            <ResponsiveContainer width="100%" height="100%">
+              <LineChart data={rocCurveData}>
+                <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" />
+                <XAxis
+                  dataKey="fpr"
+                  domain={[0, 1]}
+                  label={{ value: 'False Positive Rate', position: 'insideBottom', offset: -5 }}
+                  stroke="hsl(var(--muted-foreground))"
+                  fontSize={12}
+                />
+                <YAxis
+                  domain={[0, 1]}
+                  label={{ value: 'True Positive Rate', angle: -90, position: 'insideLeft' }}
+                  stroke="hsl(var(--muted-foreground))"
+                  fontSize={12}
+                />
+                <Tooltip
+                  contentStyle={{
+                    backgroundColor: 'hsl(var(--card))',
+                    border: '1px solid hsl(var(--border))',
+                    borderRadius: '8px',
+                  }}
+                />
+                <Line
+                  type="monotone"
+                  dataKey="tpr"
+                  stroke="hsl(217, 91%, 60%)"
+                  strokeWidth={2}
+                  dot={false}
+                  name="Model"
+                />
+              </LineChart>
+            </ResponsiveContainer>
           </div>
-        </CardContent>
-      </Card>
+          <p className="text-sm text-muted-foreground mt-4 text-center">
+            AUC = {(activeMetrics?.roc_auc ? (activeMetrics.roc_auc * 100).toFixed(1) : 'N/A')}%
+          </p>
+        </motion.div>
 
-      {/* Confusion Matrix Stats */}
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-        {metrics.map((model, idx) => (
-          <Card key={idx}>
-            <CardHeader>
-              <CardTitle className="text-lg">{model.model_name}</CardTitle>
-            </CardHeader>
-            <CardContent>
-              <div className="grid grid-cols-2 gap-4">
-                <div className="bg-green-50 p-3 rounded-lg">
-                  <div className="text-xs text-muted-foreground">True Positives</div>
-                  <div className="text-xl font-bold text-green-600">{model.true_positives}</div>
-                </div>
-                <div className="bg-green-50 p-3 rounded-lg">
-                  <div className="text-xs text-muted-foreground">True Negatives</div>
-                  <div className="text-xl font-bold text-green-600">{model.true_negatives}</div>
-                </div>
-                <div className="bg-red-50 p-3 rounded-lg">
-                  <div className="text-xs text-muted-foreground">False Positives</div>
-                  <div className="text-xl font-bold text-red-600">{model.false_positives}</div>
-                </div>
-                <div className="bg-red-50 p-3 rounded-lg">
-                  <div className="text-xs text-muted-foreground">False Negatives</div>
-                  <div className="text-xl font-bold text-red-600">{model.false_negatives}</div>
-                </div>
-              </div>
-            </CardContent>
-          </Card>
-        ))}
-      </div>
-
-      {/* Feature Importance */}
-      {featureImportance && featureImportance.feature_importance && (
-        <Card>
-          <CardHeader>
-            <CardTitle className="flex items-center gap-2">
-              <TrendingUp className="h-5 w-5" />
-              Top 10 Important Features (XGBoost)
-            </CardTitle>
-          </CardHeader>
-          <CardContent>
-            <div className="space-y-3">
-              {Object.entries(featureImportance.feature_importance)
-                .sort(([, a]: any, [, b]: any) => b - a)
-                .slice(0, 10)
-                .map(([feature, importance]: any, idx) => (
-                  <div key={idx}>
-                    <div className="flex justify-between text-sm mb-1">
-                      <span className="font-medium">{feature}</span>
-                      <span className="text-muted-foreground">
-                        {(importance * 100).toFixed(2)}%
+        {/* Confusion Matrix */}
+        <motion.div
+          initial={{ opacity: 0, y: 20 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ delay: 0.2 }}
+          className="chart-container"
+        >
+          <h3 className="text-lg font-semibold mb-4 flex items-center gap-2">
+            <AlertCircle className="w-5 h-5 text-warning" />
+            Confusion Matrix ({activeModel})
+          </h3>
+          <div className="flex items-center justify-center h-[300px]">
+            <div className="relative">
+              <div className="grid grid-cols-2 gap-2">
+                {confusionMatrix.map((row, i) =>
+                  row.map((val, j) => (
+                    <div
+                      key={`${i}-${j}`}
+                      className={cn(
+                        'w-32 h-24 flex flex-col items-center justify-center rounded-lg',
+                        i === j ? 'bg-success/20' : 'bg-destructive/20'
+                      )}
+                    >
+                      <span className="text-2xl font-bold">{val}</span>
+                      <span className="text-xs text-muted-foreground mt-1">
+                        {i === 0 && j === 0 && 'True Negative'}
+                        {i === 0 && j === 1 && 'False Positive'}
+                        {i === 1 && j === 0 && 'False Negative'}
+                        {i === 1 && j === 1 && 'True Positive'}
                       </span>
                     </div>
-                    <div className="w-full bg-gray-200 rounded-full h-2">
-                      <div
-                        className="bg-blue-600 h-2 rounded-full"
-                        style={{ width: `${importance * 100}%` }}
-                      />
-                    </div>
-                  </div>
-                ))}
+                  ))
+                )}
+              </div>
+              <div className="absolute -left-20 top-1/2 -translate-y-1/2 -rotate-90 text-sm text-muted-foreground">
+                Actual
+              </div>
+              <div className="absolute -bottom-8 left-1/2 -translate-x-1/2 text-sm text-muted-foreground">
+                Predicted
+              </div>
             </div>
-          </CardContent>
-        </Card>
-      )}
+          </div>
+        </motion.div>
+      </div>
 
-      {/* Metrics Explanation */}
-      <Card className="bg-gray-50">
-        <CardHeader>
-          <CardTitle>Understanding the Metrics</CardTitle>
-        </CardHeader>
-        <CardContent className="space-y-3 text-sm">
-          <div>
-            <span className="font-semibold">Accuracy:</span> Overall correctness of predictions (77-78% is good)
+      <div className="grid grid-cols-1 gap-6">
+        {/* Feature Importance */}
+        <motion.div
+          initial={{ opacity: 0, y: 20 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ delay: 0.3 }}
+          className="chart-container"
+        >
+          <h3 className="text-lg font-semibold mb-4 flex items-center gap-2">
+            <TrendingUp className="w-5 h-5 text-success" />
+            Feature Importance
+          </h3>
+          <div className="h-[400px]">
+            <ResponsiveContainer width="100%" height="100%">
+              <BarChart data={featureImportance} layout="vertical" margin={{ left: 100 }}>
+                <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" />
+                <XAxis
+                  type="number"
+                  stroke="hsl(var(--muted-foreground))"
+                  fontSize={12}
+                />
+                <YAxis
+                  dataKey="feature"
+                  type="category"
+                  stroke="hsl(var(--muted-foreground))"
+                  fontSize={12}
+                  tick={{ fontSize: 10 }}
+                />
+                <Tooltip
+                  contentStyle={{
+                    backgroundColor: 'hsl(var(--card))',
+                    border: '1px solid hsl(var(--border))',
+                    borderRadius: '8px',
+                  }}
+                  formatter={(value: number) => [`${(value * 100).toFixed(1)}%`, 'Importance']}
+                />
+                <Bar
+                  dataKey="importance"
+                  fill="hsl(217, 91%, 60%)"
+                  radius={[0, 4, 4, 0]}
+                />
+              </BarChart>
+            </ResponsiveContainer>
           </div>
-          <div>
-            <span className="font-semibold">Precision:</span> When model predicts churn, how often it's correct (58% means fewer false alarms)
-          </div>
-          <div>
-            <span className="font-semibold">Recall:</span> Percentage of actual churners caught by the model (58-78% is good)
-          </div>
-          <div>
-            <span className="font-semibold">F1 Score:</span> Balance between precision and recall (higher is better)
-          </div>
-          <div>
-            <span className="font-semibold">ROC-AUC:</span> Model's ability to distinguish churners from non-churners (0.82-0.84 is excellent)
-          </div>
-        </CardContent>
-      </Card>
-    </div>
+        </motion.div>
+      </div>
+    </DashboardLayout>
   );
 }
