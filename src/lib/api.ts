@@ -110,9 +110,32 @@ export interface CustomerSummary {
 export const api = {
   // Prediction
   async predictChurn(data: CustomerInput): Promise<PredictionResult> {
+    // Map Frontend keys to Backend snake_case keys
+    const payload = {
+      gender: data.gender,
+      senior_citizen: parseInt(data.SeniorCitizen.toString()) || 0,
+      partner: data.Partner,
+      dependents: data.Dependents,
+      tenure: Number(data.tenure),
+      phone_service: data.PhoneService,
+      multiple_lines: data.MultipleLines,
+      internet_service: data.InternetService,
+      online_security: data.OnlineSecurity,
+      online_backup: data.OnlineBackup,
+      device_protection: data.DeviceProtection,
+      tech_support: data.TechSupport,
+      streaming_tv: data.StreamingTV,
+      streaming_movies: data.StreamingMovies,
+      contract: data.Contract,
+      paperless_billing: data.PaperlessBilling,
+      payment_method: data.PaymentMethod,
+      monthly_charges: Number(data.MonthlyCharges),
+      total_charges: Number(data.TotalCharges) || (Number(data.MonthlyCharges) * Number(data.tenure))
+    };
+
     return fetchApi<PredictionResult>('/api/predict', {
       method: 'POST',
-      body: JSON.stringify(data),
+      body: JSON.stringify(payload),
     });
   },
 
