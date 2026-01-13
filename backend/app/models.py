@@ -87,6 +87,7 @@ class Prediction(Base):
             "risk_level": self.risk_level,
             "model_name": self.model_name,
             "model_version": self.model_version,
+            "features": self.features,
             "top_features": self.top_features,
             "recommendations": self.recommendations,
             "prediction_date": self.prediction_date.isoformat() if self.prediction_date else None

@@ -29,6 +29,9 @@ import { api, type CustomerInput, type PredictionResult } from '@/lib/api';
 
 export default function Predict() {
   const [loading, setLoading] = useState(false);
+  const [customerName, setCustomerName] = useState('');
+  const [error, setError] = useState<string | null>(null);
+  const [bulkError, setBulkError] = useState<string | null>(null);
   const [formData, setFormData] = useState<CustomerInput>({
     gender: 'Male',
     SeniorCitizen: 'No',
@@ -67,11 +70,23 @@ export default function Predict() {
 
   const handlePredict = async () => {
     setLoading(true);
+    setError(null);
+    setResult(null); // Clear previous result
     try {
       const prediction = await api.predictChurn(formData);
       setResult(prediction);
-    } catch (error) {
+    } catch (error: any) {
       console.error('Prediction failed:', error);
+
+      // Extract meaningful error message
+      let errorMessage = 'Prediction failed. ';
+      if (error.message) {
+        errorMessage += error.message;
+      } else {
+        errorMessage += 'Please check your input and try again.';
+      }
+
+      setError(errorMessage);
     } finally {
       setLoading(false);
     }
@@ -87,10 +102,32 @@ export default function Predict() {
   const handleBulkPredict = async () => {
     if (!uploadedFile) return;
     setLoading(true);
-    // TODO: Implement actual bulk prediction API
-    // For now, simulating delay
-    await new Promise((resolve) => setTimeout(resolve, 2000));
-    setLoading(false);
+    setBulkError(null);
+    setBulkResults([]);
+
+    try {
+      const response = await api.bulkPredictChurn(uploadedFile);
+
+      // Transform results to match the expected format
+      const transformedResults = response.results
+        .filter(r => !r.error) // Only include successful predictions
+        .map(r => ({
+          id: r.customer_id,
+          probability: r.churn_probability || 0,
+          risk: r.risk_level || 'UNKNOWN'
+        }));
+
+      setBulkResults(transformedResults);
+
+      if (response.failed_predictions > 0) {
+        setBulkError(`${response.successful_predictions} predictions successful, ${response.failed_predictions} failed`);
+      }
+    } catch (error: any) {
+      console.error('Bulk prediction failed:', error);
+      setBulkError(error.message || 'Bulk prediction failed. Please check your CSV format.');
+    } finally {
+      setLoading(false);
+    }
   };
 
   const downloadBulkResults = () => {
@@ -132,6 +169,20 @@ export default function Predict() {
               </h3>
 
               <div className="space-y-6 h-[600px] overflow-y-auto pr-4">
+                {/* Customer Name */}
+                <div className="space-y-4">
+                  <h4 className="font-medium text-sm text-muted-foreground border-b pb-2">Customer Information</h4>
+                  <div className="space-y-2">
+                    <Label>Customer Name (Optional)</Label>
+                    <Input
+                      type="text"
+                      value={customerName}
+                      onChange={(e) => setCustomerName(e.target.value)}
+                      placeholder="Enter customer name..."
+                    />
+                  </div>
+                </div>
+
                 {/* Demographics */}
                 <div className="space-y-4">
                   <h4 className="font-medium text-sm text-muted-foreground border-b pb-2">Demographics</h4>
@@ -350,6 +401,12 @@ export default function Predict() {
                     result.risk_level === 'Medium' && 'border-warning/50',
                     result.risk_level === 'Low' && 'border-success/50'
                   )}>
+                    {customerName && (
+                      <div className="mb-4 pb-4 border-b">
+                        <p className="text-xs text-muted-foreground">Customer</p>
+                        <p className="text-lg font-semibold">{customerName}</p>
+                      </div>
+                    )}
                     <div className="flex items-center justify-between">
                       <div>
                         <p className="text-sm text-muted-foreground">Churn Probability</p>
@@ -359,13 +416,13 @@ export default function Predict() {
                       </div>
                       <div className={cn(
                         'w-20 h-20 rounded-full flex items-center justify-center',
-                        result.risk_level === 'High' && 'bg-destructive/10',
-                        result.risk_level === 'Medium' && 'bg-warning/10',
-                        result.risk_level === 'Low' && 'bg-success/10'
+                        result.risk_level === 'HIGH' && 'bg-destructive/10',
+                        result.risk_level === 'MEDIUM' && 'bg-warning/10',
+                        result.risk_level === 'LOW' && 'bg-success/10'
                       )}>
-                        {result.risk_level === 'High' ? (
+                        {result.risk_level === 'HIGH' ? (
                           <XCircle className="w-10 h-10 text-destructive" />
-                        ) : result.risk_level === 'Medium' ? (
+                        ) : result.risk_level === 'MEDIUM' ? (
                           <AlertTriangle className="w-10 h-10 text-warning" />
                         ) : (
                           <CheckCircle className="w-10 h-10 text-success" />
@@ -375,9 +432,9 @@ export default function Predict() {
                     <div className="mt-4">
                       <span className={cn(
                         'risk-badge text-base px-4 py-1',
-                        result.risk_level === 'High' && 'risk-high',
-                        result.risk_level === 'Medium' && 'risk-medium',
-                        result.risk_level === 'Low' && 'risk-low'
+                        result.risk_level === 'HIGH' && 'risk-high',
+                        result.risk_level === 'MEDIUM' && 'risk-medium',
+                        result.risk_level === 'LOW' && 'risk-low'
                       )}>
                         {result.risk_level} Risk
                       </span>
@@ -424,6 +481,21 @@ export default function Predict() {
                     </ul>
                   </div>
                 </>
+              ) : error ? (
+                <div className="chart-container flex flex-col items-center justify-center min-h-[400px] text-center">
+                  <XCircle className="w-16 h-16 text-destructive mb-4" />
+                  <h3 className="text-lg font-medium text-destructive">Prediction Failed</h3>
+                  <p className="text-sm text-muted-foreground mt-2 max-w-md">
+                    {error}
+                  </p>
+                  <Button
+                    onClick={handlePredict}
+                    variant="outline"
+                    className="mt-4"
+                  >
+                    Try Again
+                  </Button>
+                </div>
               ) : (
                 <div className="chart-container flex flex-col items-center justify-center min-h-[400px] text-center">
                   <Brain className="w-16 h-16 text-muted-foreground/30 mb-4" />
@@ -490,6 +562,67 @@ export default function Predict() {
                 </Button>
               )}
             </div>
+
+            {/* Error Display for Bulk Prediction */}
+            {bulkError && (
+              <div className="mt-4 p-4 bg-destructive/10 border border-destructive/20 rounded-lg">
+                <div className="flex items-start gap-3">
+                  <XCircle className="w-5 h-5 text-destructive flex-shrink-0 mt-0.5" />
+                  <div>
+                    <h4 className="font-medium text-destructive">Bulk Prediction Error</h4>
+                    <p className="text-sm text-muted-foreground mt-1">{bulkError}</p>
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {/* Results Table */}
+            {bulkResults.length > 0 && (
+              <div className="mt-6 chart-container">
+                <h3 className="text-lg font-semibold mb-4">
+                  Prediction Results ({bulkResults.length} customers)
+                </h3>
+                <div className="max-h-[400px] overflow-y-auto">
+                  <table className="w-full text-sm">
+                    <thead className="sticky top-0 bg-background border-b">
+                      <tr>
+                        <th className="text-left p-3">Customer ID</th>
+                        <th className="text-left p-3">Churn Probability</th>
+                        <th className="text-left p-3">Risk Level</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {bulkResults.map((result, idx) => (
+                        <tr key={idx} className="border-b hover:bg-muted/50">
+                          <td className="p-3 font-mono text-xs">{result.id}</td>
+                          <td className="p-3">
+                            <div className="flex items-center gap-2">
+                              <div className="w-24 bg-secondary rounded-full h-2">
+                                <div
+                                  className="bg-primary h-2 rounded-full"
+                                  style={{ width: `${result.probability * 100}%` }}
+                                />
+                              </div>
+                              <span>{(result.probability * 100).toFixed(1)}%</span>
+                            </div>
+                          </td>
+                          <td className="p-3">
+                            <span className={cn(
+                              'risk-badge text-xs',
+                              result.risk === 'HIGH' && 'risk-high',
+                              result.risk === 'MEDIUM' && 'risk-medium',
+                              result.risk === 'LOW' && 'risk-low'
+                            )}>
+                              {result.risk}
+                            </span>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            )}
           </motion.div>
         </TabsContent>
       </Tabs>

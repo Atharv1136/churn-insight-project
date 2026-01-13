@@ -38,8 +38,8 @@ export function Sidebar() {
       {/* Logo */}
       <div className="flex items-center h-16 px-4 border-b border-sidebar-border">
         <div className="flex items-center gap-3">
-          <div className="w-10 h-10 rounded-xl gradient-primary flex items-center justify-center shadow-glow">
-            <Activity className="w-6 h-6 text-primary-foreground" />
+          <div className="w-10 h-10 rounded-xl gradient-primary flex items-center justify-center shadow-glow overflow-hidden">
+            <img src="/logo.png" alt="Churn Guard" className="w-8 h-8 object-contain" />
           </div>
           <AnimatePresence>
             {!collapsed && (
@@ -49,8 +49,8 @@ export function Sidebar() {
                 exit={{ opacity: 0, x: -10 }}
                 transition={{ duration: 0.2 }}
               >
-                <h1 className="font-bold text-lg text-sidebar-foreground">ChurnVision</h1>
-                <p className="text-xs text-sidebar-foreground/60">Prediction System</p>
+                <h1 className="font-bold text-lg text-sidebar-foreground">Churn Guard</h1>
+                <p className="text-xs text-sidebar-foreground/60">Prediction App</p>
               </motion.div>
             )}
           </AnimatePresence>

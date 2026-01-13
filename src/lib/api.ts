@@ -109,7 +109,7 @@ export interface CustomerSummary {
 // API Methods
 export const api = {
   // Prediction
-  async predictChurn(data: CustomerInput): Promise<PredictionResult> {
+  async predictChurn(data: CustomerInput, savePrediction: boolean = true): Promise<PredictionResult> {
     // Map Frontend keys to Backend snake_case keys
     const payload = {
       gender: data.gender,
@@ -130,13 +130,44 @@ export const api = {
       paperless_billing: data.PaperlessBilling,
       payment_method: data.PaymentMethod,
       monthly_charges: Number(data.MonthlyCharges),
-      total_charges: Number(data.TotalCharges) || (Number(data.MonthlyCharges) * Number(data.tenure))
+      total_charges: Number(data.TotalCharges) || (Number(data.MonthlyCharges) * Number(data.tenure)),
+      save_prediction: savePrediction
     };
 
     return fetchApi<PredictionResult>('/api/predict', {
       method: 'POST',
       body: JSON.stringify(payload),
     });
+  },
+
+  async bulkPredictChurn(file: File): Promise<{
+    total_rows: number;
+    successful_predictions: number;
+    failed_predictions: number;
+    results: Array<{
+      row_number: number;
+      customer_id: string;
+      churn_probability: number | null;
+      churn_prediction: number | null;
+      risk_level: string | null;
+      error?: string;
+    }>;
+  }> {
+    const formData = new FormData();
+    formData.append('file', file);
+
+    const url = `${API_BASE_URL}/api/bulk_predict`;
+    const response = await fetch(url, {
+      method: 'POST',
+      body: formData,
+    });
+
+    if (!response.ok) {
+      const error = await response.json().catch(() => ({ detail: 'Unknown error' }));
+      throw new ApiError(response.status, error.detail || `HTTP ${response.status}`);
+    }
+
+    return await response.json();
   },
 
   // Metrics
@@ -206,6 +237,12 @@ export const api = {
     const data = await fetchApi<any>(`/api/customers${query ? `?${query}` : ''}`);
     return data.customers; // Return only the array to match component expectations
     // Note: Use getCustomersPaged if you need total count
+  },
+
+  // Get recent predictions for explainability
+  async getRecentPredictions(limit: number = 20) {
+    const data = await fetchApi<any>(`/api/predictions/recent?limit=${limit}`);
+    return data.predictions;
   },
 
   // Health check

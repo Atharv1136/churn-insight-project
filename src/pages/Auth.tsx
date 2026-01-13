@@ -32,7 +32,7 @@ export default function Auth() {
       } else {
         const { error } = await signUp(email, password, fullName);
         if (error) throw error;
-        toast({ title: 'Account created!', description: 'Welcome to ChurnVision.' });
+        toast({ title: 'Account created!', description: 'Welcome to Churn Guard.' });
         navigate('/dashboard');
       }
     } catch (error: unknown) {
@@ -55,12 +55,12 @@ export default function Auth() {
         >
           {/* Logo */}
           <div className="flex items-center gap-3 mb-8">
-            <div className="w-12 h-12 rounded-xl gradient-primary flex items-center justify-center shadow-glow">
-              <Activity className="w-7 h-7 text-primary-foreground" />
+            <div className="w-12 h-12 rounded-xl gradient-primary flex items-center justify-center shadow-glow overflow-hidden">
+              <img src="/logo.png" alt="Churn Guard" className="w-9 h-9 object-contain" />
             </div>
             <div>
-              <h1 className="text-2xl font-bold text-foreground">ChurnVision</h1>
-              <p className="text-sm text-muted-foreground">Prediction System</p>
+              <h1 className="text-2xl font-bold text-foreground">Churn Guard</h1>
+              <p className="text-sm text-muted-foreground">Prediction App</p>
             </div>
           </div>
 
@@ -165,7 +165,7 @@ export default function Auth() {
         <div className="absolute inset-0 bg-gradient-to-br from-primary/20 via-transparent to-transparent" />
         <div className="absolute top-1/4 -right-20 w-96 h-96 bg-primary/10 rounded-full blur-3xl" />
         <div className="absolute bottom-1/4 -left-20 w-96 h-96 bg-primary/10 rounded-full blur-3xl" />
-        
+
         <motion.div
           initial={{ opacity: 0, scale: 0.95 }}
           animate={{ opacity: 1, scale: 1 }}
@@ -178,7 +178,7 @@ export default function Auth() {
           <p className="text-lg text-sidebar-foreground/70 max-w-md">
             Leverage AI-powered analytics to identify at-risk customers and take proactive retention actions.
           </p>
-          
+
           <div className="mt-12 grid grid-cols-3 gap-6">
             {[
               { label: 'Accuracy', value: '94.2%' },

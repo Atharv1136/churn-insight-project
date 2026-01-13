@@ -10,6 +10,7 @@ import numpy as np
 from datetime import datetime
 import logging
 import io
+import uuid
 
 from app.database import get_db
 from app.models import Prediction, Customer
@@ -48,6 +49,7 @@ class PredictionRequest(BaseModel):
     payment_method: str = Field(..., description="Payment method")
     monthly_charges: float = Field(..., gt=0, description="Monthly charges")
     total_charges: Optional[float] = None
+    save_prediction: bool = Field(True, description="Whether to save prediction data to database")
     
     class Config:
         json_schema_extra = {
@@ -157,10 +159,16 @@ async def predict_churn(
     try:
         # Prepare input data
         input_data = request.dict()
-        customer_id = input_data.get('customer_id', f"CUST_{datetime.now().strftime('%Y%m%d%H%M%S')}")
+        
+        # Ensure customer_id is always set
+        customer_id = input_data.get('customer_id')
+        if not customer_id or customer_id == '' or customer_id is None:
+            customer_id = f"CUST_{datetime.now().strftime('%Y%m%d%H%M%S')}_{str(uuid.uuid4())[:8]}"
+        
+        logger.info(f"Processing prediction for customer_id: {customer_id}")
         
         # Calculate total charges if not provided
-        if input_data['total_charges'] is None:
+        if input_data.get('total_charges') is None:
             input_data['total_charges'] = input_data['monthly_charges'] * input_data['tenure']
         
         # Convert to DataFrame format expected by processor
@@ -190,8 +198,13 @@ async def predict_churn(
         # Feature engineering
         df_engineered = _feature_engineer.engineer_features(df_input)
         
-        # Process features
-        X_processed, _, feature_names = _processor.process_pipeline(df_engineered, fit=False, target_col='Churn')
+        # Process features with expected feature names from metadata
+        X_processed, _, feature_names = _processor.process_pipeline(
+            df_engineered, 
+            fit=False, 
+            target_col='Churn',
+            expected_features=_feature_names if _feature_names else None
+        )
         
         # Make prediction
         prediction_result = _predictor.predict_single(X_processed)
@@ -213,22 +226,55 @@ async def predict_churn(
                 logger.warning(f"Error generating explanation: {e}")
                 recommendations = ["Unable to generate recommendations at this time"]
         
-        # Save prediction to database
-        db_prediction = Prediction(
-            customer_id=customer_id,
-            churn_probability=prediction_result['churn_probability'],
-            churn_prediction=prediction_result['churn_prediction'],
-            risk_level=prediction_result['risk_level'],
-            model_name=prediction_result['model_name'],
-            model_version=settings.MODEL_VERSION,
-            features=input_data,
-            top_features=top_features,
-            recommendations=recommendations
-        )
-        
-        db.add(db_prediction)
-        db.commit()
-        db.refresh(db_prediction)
+        # Save customer data to database for future training
+        if request.save_prediction:
+            try:
+                existing_customer = db.query(Customer).filter(Customer.customer_id == customer_id).first()
+                if not existing_customer:
+                    db_customer = Customer(
+                        customer_id=customer_id,
+                        gender=input_data['gender'],
+                        senior_citizen=bool(input_data['senior_citizen']),
+                        partner=input_data['partner'] == 'Yes',
+                        dependents=input_data['dependents'] == 'Yes',
+                        tenure=input_data['tenure'],
+                        contract_type=input_data['contract'],
+                        payment_method=input_data['payment_method'],
+                        paperless_billing=input_data['paperless_billing'] == 'Yes',
+                        phone_service=input_data['phone_service'] == 'Yes',
+                        multiple_lines=input_data['multiple_lines'] == 'Yes',
+                        internet_service=input_data['internet_service'],
+                        online_security=input_data['online_security'] == 'Yes',
+                        online_backup=input_data['online_backup'] == 'Yes',
+                        device_protection=input_data['device_protection'] == 'Yes',
+                        tech_support=input_data['tech_support'] == 'Yes',
+                        streaming_tv=input_data['streaming_tv'] == 'Yes',
+                        streaming_movies=input_data['streaming_movies'] == 'Yes',
+                        monthly_charges=input_data['monthly_charges'],
+                        total_charges=input_data['total_charges'],
+                        churn_status=prediction_result['churn_prediction']
+                    )
+                    db.add(db_customer)
+                    logger.info(f"Saved new customer data for {customer_id}")
+            except Exception as e:
+                logger.warning(f"Could not save customer data: {e}")
+            
+            # Save prediction to database
+            db_prediction = Prediction(
+                customer_id=customer_id,
+                churn_probability=prediction_result['churn_probability'],
+                churn_prediction=prediction_result['churn_prediction'],
+                risk_level=prediction_result['risk_level'],
+                model_name=prediction_result['model_name'],
+                model_version=settings.MODEL_VERSION,
+                features=input_data,
+                top_features=top_features,
+                recommendations=recommendations
+            )
+            
+            db.add(db_prediction)
+            db.commit()
+            db.refresh(db_prediction)
         
         # Return response
         return PredictionResponse(
@@ -335,3 +381,120 @@ async def get_recent_predictions(
     except Exception as e:
         logger.error(f"Error fetching predictions: {e}")
         raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/bulk_predict")
+async def bulk_predict(
+    file: UploadFile = File(...),
+    db: Session = Depends(get_db)
+):
+    """
+    Bulk prediction from CSV file
+    """
+    global _predictor, _processor, _feature_engineer, _explainer, _feature_names
+    
+    if not _predictor:
+        raise HTTPException(status_code=503, detail="Model not loaded")
+    
+    try:
+        # Read CSV file
+        contents = await file.read()
+        df = pd.read_csv(io.BytesIO(contents))
+        
+        logger.info(f"Processing bulk prediction for {len(df)} customers")
+        
+        results = []
+        
+        for idx, row in df.iterrows():
+            try:
+                # Convert row to input format
+                input_data = {
+                    'gender': str(row.get('gender', 'Male')),
+                    'senior_citizen': int(row.get('SeniorCitizen', 0)),
+                    'partner': str(row.get('Partner', 'No')),
+                    'dependents': str(row.get('Dependents', 'No')),
+                    'tenure': int(row.get('tenure', 0)),
+                    'phone_service': str(row.get('PhoneService', 'No')),
+                    'multiple_lines': str(row.get('MultipleLines', 'No')),
+                    'internet_service': str(row.get('InternetService', 'No')),
+                    'online_security': str(row.get('OnlineSecurity', 'No')),
+                    'online_backup': str(row.get('OnlineBackup', 'No')),
+                    'device_protection': str(row.get('DeviceProtection', 'No')),
+                    'tech_support': str(row.get('TechSupport', 'No')),
+                    'streaming_tv': str(row.get('StreamingTV', 'No')),
+                    'streaming_movies': str(row.get('StreamingMovies', 'No')),
+                    'contract': str(row.get('Contract', 'Month-to-month')),
+                    'paperless_billing': str(row.get('PaperlessBilling', 'No')),
+                    'payment_method': str(row.get('PaymentMethod', 'Electronic check')),
+                    'monthly_charges': float(row.get('MonthlyCharges', 0)),
+                    'total_charges': float(row.get('TotalCharges', 0))
+                }
+                
+                # Create DataFrame for processing
+                df_single = pd.DataFrame([input_data])
+                
+                # Engineer features
+                df_engineered = _feature_engineer.engineer_features(df_single)
+                
+                # Process features with expected feature names from metadata
+                X_processed, _, feature_names = _processor.process_pipeline(
+                    df_engineered, 
+                    fit=False, 
+                    target_col='Churn',
+                    expected_features=_feature_names if _feature_names else None
+                )
+                
+                # Make prediction
+                prediction_result = _predictor.predict_single(X_processed)
+                
+                # Get SHAP explanation
+                top_features = []
+                if _explainer:
+                    try:
+                        explanation = _explainer.explain_with_recommendations(
+                            X_processed,
+                            feature_names,
+                            prediction_result['churn_probability']
+                        )
+                        top_features = explanation.get('top_features', [])
+                    except Exception as e:
+                        logger.warning(f"Could not generate SHAP explanation for row {idx}: {e}")
+                
+                # Generate customer ID
+                customer_id = f"BULK_{datetime.now().strftime('%Y%m%d%H%M%S')}_{uuid.uuid4().hex[:8]}"
+                
+                results.append({
+                    'row_number': idx + 1,
+                    'customer_id': customer_id,
+                    'churn_probability': round(prediction_result['churn_probability'], 4),
+                    'churn_prediction': prediction_result['churn_prediction'],
+                    'risk_level': prediction_result['risk_level']
+                })
+                
+            except Exception as e:
+                logger.error(f"Error processing row {idx}: {e}")
+                results.append({
+                    'row_number': idx + 1,
+                    'customer_id': f"ERROR_ROW_{idx + 1}",
+                    'error': str(e),
+                    'churn_probability': None,
+                    'churn_prediction': None,
+                    'risk_level': None
+                })
+        
+        logger.info(f"Bulk prediction completed. Processed {len(results)} rows")
+        
+        return {
+            "total_rows": len(df),
+            "successful_predictions": len([r for r in results if 'error' not in r]),
+            "failed_predictions": len([r for r in results if 'error' in r]),
+            "results": results
+        }
+        
+    except pd.errors.EmptyDataError:
+        raise HTTPException(status_code=400, detail="CSV file is empty")
+    except pd.errors.ParserError:
+        raise HTTPException(status_code=400, detail="Invalid CSV format")
+    except Exception as e:
+        logger.error(f"Bulk prediction error: {e}")
+        raise HTTPException(status_code=500, detail=f"Bulk prediction failed: {str(e)}")

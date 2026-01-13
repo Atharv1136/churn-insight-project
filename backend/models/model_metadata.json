@@ -48,7 +48,7 @@
     "PaymentMethod_Mailed check"
   ],
   "model_version": "1.0.0",
-  "trained_at": "2026-01-08T18:42:52.682676",
+  "trained_at": "2026-01-09T16:52:33.124191",
   "n_features": 46,
   "training_samples": 8278,
   "test_samples": 1409,

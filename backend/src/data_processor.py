@@ -148,7 +148,7 @@ class DataProcessor:
         
         return X_scaled
     
-    def process_pipeline(self, df: pd.DataFrame, fit: bool = True, target_col: str = 'Churn') -> Tuple[np.ndarray, np.ndarray, list]:
+    def process_pipeline(self, df: pd.DataFrame, fit: bool = True, target_col: str = 'Churn', expected_features: list = None) -> Tuple[np.ndarray, np.ndarray, list]:
         """
         Complete preprocessing pipeline
         
@@ -156,6 +156,7 @@ class DataProcessor:
             df: Raw DataFrame
             fit: Whether to fit transformers
             target_col: Target column name
+            expected_features: List of expected feature names (for prediction alignment)
             
         Returns:
             Tuple of (X_scaled, y, feature_names)
@@ -168,6 +169,18 @@ class DataProcessor:
         
         # Prepare features
         X, y = self.prepare_features(df_encoded, target_col=target_col)
+        
+        # If expected_features provided (during prediction), align columns
+        if expected_features is not None and not fit:
+            # Add missing columns with 0
+            for col in expected_features:
+                if col not in X.columns:
+                    X[col] = 0
+            
+            # Remove extra columns and reorder to match expected features
+            X = X[expected_features]
+            self.feature_names = expected_features
+            logger.info(f"Aligned features to match trained model: {len(expected_features)} features")
         
         # Scale features
         X_scaled = self.scale_features(X, fit=fit)

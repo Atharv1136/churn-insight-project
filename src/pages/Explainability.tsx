@@ -6,6 +6,7 @@ import {
   TrendingUp,
   TrendingDown,
   Loader2,
+  Info,
 } from 'lucide-react';
 import {
   BarChart,
@@ -29,6 +30,7 @@ import {
 import { Slider } from '@/components/ui/slider';
 import { cn } from '@/lib/utils';
 import { api, type CustomerInput, type PredictionResult } from '@/lib/api';
+import { useBackendStatus } from '@/hooks/useBackendStatus';
 
 // Helper to simulate SHAP values (since we don't have backend endpoint yet)
 const getSimulatedShapValues = (customerId: string, input: CustomerInput) => {
@@ -45,8 +47,9 @@ const getSimulatedShapValues = (customerId: string, input: CustomerInput) => {
   return shap.map(s => ({ ...s, impact: s.impact as 'positive' | 'negative' }));
 };
 
-const getSimulatedExplanation = (result: PredictionResult | null, input: CustomerInput) => {
+const getSimulatedExplanation = (result: PredictionResult | null, input: CustomerInput | null) => {
   if (!result) return "Select a customer to view explanation.";
+  if (!input) return "Loading customer data...";
 
   const risk = result.risk_level;
   const factors = [];
@@ -57,9 +60,9 @@ const getSimulatedExplanation = (result: PredictionResult | null, input: Custome
   if (input.TechSupport === 'No') factors.push("lack of tech support");
   if (input.InternetService === 'Fiber optic') factors.push("fiber optic service (often higher churn)");
 
-  if (risk === 'High') {
+  if (risk === 'HIGH') {
     return `This customer is at High Risk of churn (${(result.churn_probability * 100).toFixed(1)}%). Primary drivers include ${factors.slice(0, 3).join(", ")}. Immediate retention action is recommended.`;
-  } else if (risk === 'Medium') {
+  } else if (risk === 'MEDIUM') {
     return `This customer is at Medium Risk (${(result.churn_probability * 100).toFixed(1)}%). While generally stable, risk factors like ${factors.slice(0, 2).join(" and ")} indicate need for monitoring.`;
   } else {
     return `This customer is at Low Risk (${(result.churn_probability * 100).toFixed(1)}%). They show strong loyalty indicators such as ${input.Contract !== 'Month-to-month' ? 'long-term contract' : 'their tenure'}.`;
@@ -67,33 +70,92 @@ const getSimulatedExplanation = (result: PredictionResult | null, input: Custome
 };
 
 export default function Explainability() {
+  const { isConnected, isChecking, recheckConnection } = useBackendStatus();
   const [customers, setCustomers] = useState<any[]>([]);
   const [selectedCustomerId, setSelectedCustomerId] = useState<string>("");
   const [loading, setLoading] = useState(true);
+  const [predicting, setPredicting] = useState(false);
+  const [error, setError] = useState<string | null>(null);
   const [prediction, setPrediction] = useState<PredictionResult | null>(null);
   const [currentInput, setCurrentInput] = useState<CustomerInput | null>(null);
 
   useEffect(() => {
-    loadCustomers();
+    loadPredictions();
   }, []);
 
-  const loadCustomers = async () => {
+  const loadPredictions = async () => {
     try {
-      const response = await api.getCustomers({ limit: 10 });
-      const customerList = (response as any[]).map(c => ({
-        id: c.customerID || c.customer_id,
-        // Store full object to map to input later
-        raw: c
-      }));
-      setCustomers(customerList);
-      if (customerList.length > 0) {
-        setSelectedCustomerId(customerList[0].id);
-        handleCustomerSelect(customerList[0].raw);
+      const predictions = await api.getRecentPredictions(20);
+
+      if (predictions && predictions.length > 0) {
+        // Map predictions to customer list format
+        const customerList = predictions.map((pred: any) => ({
+          id: pred.customer_id,
+          name: pred.customer_id, // We can enhance this later with actual names
+          probability: pred.churn_probability,
+          risk_level: pred.risk_level,
+          prediction_date: pred.prediction_date,
+          raw: pred
+        }));
+
+        setCustomers(customerList);
+
+        // Auto-select first customer
+        if (customerList.length > 0) {
+          setSelectedCustomerId(customerList[0].id);
+          // Load the stored prediction instead of re-predicting
+          loadStoredPrediction(customerList[0].raw);
+        }
       }
     } catch (error) {
-      console.error('Failed to load customers:', error);
+      console.error('Failed to load predictions:', error);
+      setError('Failed to load predicted customers. Please ensure you have made some predictions first.');
     } finally {
       setLoading(false);
+    }
+  };
+
+  const loadStoredPrediction = (predictionData: any) => {
+    // Use the stored prediction data
+    setPrediction({
+      customer_id: predictionData.customer_id,
+      churn_probability: predictionData.churn_probability,
+      churn_prediction: predictionData.churn_prediction,
+      risk_level: predictionData.risk_level,
+      model_name: predictionData.model_name,
+      model_version: predictionData.model_version,
+      top_features: predictionData.top_features || [],
+      recommendations: predictionData.recommendations || [],
+      prediction_date: predictionData.prediction_date
+    });
+
+    // Set current input from stored features
+    if (predictionData.features) {
+      const f = predictionData.features;
+      // Map the stored features to CustomerInput format
+      // Handle both snake_case and camelCase from backend
+      const mappedInput: CustomerInput = {
+        gender: f.gender || 'Male',
+        SeniorCitizen: (f.senior_citizen !== undefined ? (f.senior_citizen ? 'Yes' : 'No') : (f.SeniorCitizen || 'No')),
+        Partner: f.partner || f.Partner || 'No',
+        Dependents: f.dependents || f.Dependents || 'No',
+        tenure: f.tenure || 0,
+        PhoneService: f.phone_service || f.PhoneService || 'No',
+        MultipleLines: f.multiple_lines || f.MultipleLines || 'No',
+        InternetService: f.internet_service || f.InternetService || 'No',
+        OnlineSecurity: f.online_security || f.OnlineSecurity || 'No',
+        OnlineBackup: f.online_backup || f.OnlineBackup || 'No',
+        DeviceProtection: f.device_protection || f.DeviceProtection || 'No',
+        TechSupport: f.tech_support || f.TechSupport || 'No',
+        StreamingTV: f.streaming_tv || f.StreamingTV || 'No',
+        StreamingMovies: f.streaming_movies || f.StreamingMovies || 'No',
+        Contract: f.contract || f.Contract || 'Month-to-month',
+        PaperlessBilling: f.paperless_billing || f.PaperlessBilling || 'No',
+        PaymentMethod: f.payment_method || f.PaymentMethod || 'Electronic check',
+        MonthlyCharges: f.monthly_charges || f.MonthlyCharges || 0,
+        TotalCharges: f.total_charges || f.TotalCharges || 0,
+      };
+      setCurrentInput(mappedInput);
     }
   };
 
@@ -128,17 +190,36 @@ export default function Explainability() {
   const onSelectChange = (id: string) => {
     setSelectedCustomerId(id);
     const customer = customers.find(c => c.id === id);
-    if (customer) {
-      handleCustomerSelect(customer.raw);
+    if (customer && customer.raw) {
+      loadStoredPrediction(customer.raw);
     }
   };
 
   const runPrediction = async (input: CustomerInput) => {
+    setPredicting(true);
+    setError(null);
     try {
-      const result = await api.predictChurn(input);
+      // Don't save simulation predictions to database
+      const result = await api.predictChurn(input, false);
       setPrediction(result);
-    } catch (error) {
+    } catch (error: any) {
       console.error('Prediction failed:', error);
+
+      // Provide user-friendly error messages
+      let errorMessage = 'Failed to get prediction. ';
+
+      if (error.message?.includes('503') || error.message?.includes('Models not available')) {
+        errorMessage += 'The ML models are not trained yet. Please run "python train_models.py" in the backend directory first.';
+      } else if (error.message?.includes('Network error') || error.message?.includes('fetch')) {
+        errorMessage += 'Cannot connect to the backend server. Please ensure the backend is running on http://localhost:8000';
+      } else {
+        errorMessage += error.message || 'Unknown error occurred.';
+      }
+
+      setError(errorMessage);
+      setPrediction(null);
+    } finally {
+      setPredicting(false);
     }
   };
 
@@ -154,8 +235,16 @@ export default function Explainability() {
     runPrediction(newInput);
   };
 
-  const shapValues = currentInput ? getSimulatedShapValues(selectedCustomerId, currentInput) : [];
-  const explanation = getSimulatedExplanation(prediction, currentInput as CustomerInput);
+  // Use real SHAP values from prediction if available, otherwise use simulated
+  const shapValues = prediction?.top_features && prediction.top_features.length > 0
+    ? prediction.top_features.map((feature: any) => ({
+      feature: feature.feature || feature.name,
+      value: Math.abs(feature.contribution || feature.value || 0),
+      impact: (feature.contribution || feature.value || 0) > 0 ? 'positive' as const : 'negative' as const
+    }))
+    : (currentInput ? getSimulatedShapValues(selectedCustomerId, currentInput) : []);
+
+  const explanation = getSimulatedExplanation(prediction, currentInput);
 
   const chartData = shapValues.map((item) => ({
     ...item,
@@ -174,6 +263,38 @@ export default function Explainability() {
 
   return (
     <DashboardLayout>
+      {/* Backend Status Indicator */}
+      {!isChecking && isConnected === false && (
+        <div className="mb-4 p-4 bg-destructive/10 border border-destructive/20 rounded-lg">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-3">
+              <div className="h-2 w-2 rounded-full bg-destructive animate-pulse" />
+              <div>
+                <p className="text-sm font-medium text-destructive">Backend Server Disconnected</p>
+                <p className="text-xs text-destructive/80 mt-0.5">
+                  Cannot connect to http://localhost:8000. Please start the backend server.
+                </p>
+              </div>
+            </div>
+            <button
+              onClick={recheckConnection}
+              className="px-3 py-1.5 bg-destructive/20 hover:bg-destructive/30 text-destructive text-xs rounded transition-colors"
+            >
+              Retry Connection
+            </button>
+          </div>
+        </div>
+      )}
+
+      {!isChecking && isConnected === true && (
+        <div className="mb-4 p-3 bg-success/10 border border-success/20 rounded-lg">
+          <div className="flex items-center gap-2">
+            <div className="h-2 w-2 rounded-full bg-success" />
+            <p className="text-xs text-success">Backend Connected</p>
+          </div>
+        </div>
+      )}
+
       <div className="page-header">
         <h1 className="page-title">Model Explainability</h1>
         <p className="page-subtitle">Understand why customers are predicted to churn</p>
@@ -194,13 +315,48 @@ export default function Explainability() {
             <SelectContent>
               {customers.map((c) => (
                 <SelectItem key={c.id} value={c.id}>
-                  <span className="font-mono">{c.id}</span>
+                  <div className="flex items-center justify-between w-full gap-3">
+                    <span className="font-mono text-sm">{c.id}</span>
+                    <div className="flex items-center gap-2">
+                      <span className={cn(
+                        "text-xs px-2 py-0.5 rounded",
+                        c.risk_level === 'HIGH' && "bg-destructive/20 text-destructive",
+                        c.risk_level === 'MEDIUM' && "bg-warning/20 text-warning",
+                        c.risk_level === 'LOW' && "bg-success/20 text-success"
+                      )}>
+                        {c.risk_level}
+                      </span>
+                      <span className="text-xs text-muted-foreground">
+                        {(c.probability * 100).toFixed(1)}%
+                      </span>
+                    </div>
+                  </div>
                 </SelectItem>
               ))}
             </SelectContent>
           </Select>
 
-          {prediction && (
+          {error && (
+            <div className="mt-4 p-4 bg-destructive/10 border border-destructive/20 rounded-lg">
+              <p className="text-sm text-destructive font-medium">⚠️ Error</p>
+              <p className="text-xs text-destructive/80 mt-1">{error}</p>
+              <button
+                onClick={() => currentInput && runPrediction(currentInput)}
+                className="mt-3 px-3 py-1.5 bg-destructive/20 hover:bg-destructive/30 text-destructive text-xs rounded transition-colors"
+              >
+                Retry Prediction
+              </button>
+            </div>
+          )}
+
+          {predicting && (
+            <div className="mt-4 p-4 bg-primary/10 border border-primary/20 rounded-lg flex items-center gap-3">
+              <Loader2 className="h-4 w-4 animate-spin text-primary" />
+              <p className="text-sm text-primary">Running prediction...</p>
+            </div>
+          )}
+
+          {prediction && !predicting && (
             <div className="mt-6 space-y-4">
               <div className="p-4 bg-muted/50 rounded-lg">
                 <p className="text-sm text-muted-foreground">Churn Probability</p>
@@ -242,8 +398,8 @@ export default function Explainability() {
           className="chart-container lg:col-span-2"
         >
           <h3 className="text-lg font-semibold mb-4 flex items-center gap-2">
-            <HelpCircle className="w-5 h-5 text-primary" />
-            SHAP Feature Contributions (Simulated)
+            <Info className="h-5 w-5 text-primary" />
+            SHAP Feature Contributions
           </h3>
           <div className="h-[300px]">
             <ResponsiveContainer width="100%" height="100%">
@@ -357,7 +513,10 @@ export default function Explainability() {
             <p className="text-sm leading-relaxed">{explanation}</p>
           </div>
 
-          <h4 className="text-sm font-medium mb-4">What-If Analysis (Real-time Prediction)</h4>
+          <h4 className="text-sm font-medium mb-4 flex items-center gap-2">
+            What-If Analysis (Real-time Prediction)
+            {predicting && <Loader2 className="h-3 w-3 animate-spin text-primary" />}
+          </h4>
           {currentInput && (
             <div className="space-y-4">
               <div className="space-y-2">
