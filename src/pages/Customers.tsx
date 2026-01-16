@@ -105,7 +105,7 @@ export default function Customers() {
     }
 
     return result;
-  }, [search, contractFilter, churnFilter, sortField, sortDirection]);
+  }, [customers, search, contractFilter, churnFilter, sortField, sortDirection]);
 
   const paginatedCustomers = filteredCustomers.slice((page - 1) * pageSize, page * pageSize);
   const totalPages = Math.ceil(filteredCustomers.length / pageSize);

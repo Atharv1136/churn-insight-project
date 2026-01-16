@@ -70,6 +70,7 @@ async def get_customers(
                     "contract_type": c.contract_type,
                     "payment_method": c.payment_method,
                     "internet_service": c.internet_service,
+                    "tech_support": c.tech_support,
                     "churn_status": c.churn_status,
                     "created_at": c.created_at.isoformat() if c.created_at else None
                 }
